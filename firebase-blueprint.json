@@ -1,0 +1,44 @@
+{
+  "entities": {
+    "community_question": {
+      "title": "Community Question",
+      "description": "A student question with answers and metadata in the student community",
+      "type": "object",
+      "properties": {
+        "author": { "type": "string", "maxLength": 100, "description": "Name of the author" },
+        "userId": { "type": "string", "maxLength": 128, "description": "UID of the author user" },
+        "track": { "type": "string", "maxLength": 100, "description": "Educational track of the student" },
+        "score": { "type": "string", "maxLength": 20, "description": "The student score percentage" },
+        "question": { "type": "string", "maxLength": 1000, "description": "The student's query text" },
+        "answer": { "type": "string", "maxLength": 2000, "description": "The expert response or AI advisor reply" },
+        "likes": { "type": "number", "description": "Number of helpful votes" },
+        "createdAt": { "type": "string", "format": "date-time", "description": "Timestamp when question was created" }
+      },
+      "required": ["author", "userId", "track", "question", "createdAt", "likes"]
+    },
+    "ai_chat_message": {
+      "title": "AI Chat Message",
+      "description": "A single chat message in a conversation between a student and the AI advisor",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string", "maxLength": 128, "description": "UID of the user who owns the chat" },
+        "sender": { "type": "string", "enum": ["user", "ai"], "description": "Sender of the message" },
+        "text": { "type": "string", "maxLength": 5000, "description": "Text content of the message" },
+        "createdAt": { "type": "string", "format": "date-time", "description": "Timestamp when message was created" },
+        "stage": { "type": "string", "maxLength": 100, "description": "Optional educational stage selected" },
+        "score": { "type": "string", "maxLength": 20, "description": "Optional score used in chat context" }
+      },
+      "required": ["userId", "sender", "text", "createdAt"]
+    }
+  },
+  "firestore": {
+    "/community_questions/{questionId}": {
+      "schema": "community_question",
+      "description": "Collection of all student questions and advisor replies in the community"
+    },
+    "/ai_chats/{chatId}": {
+      "schema": "ai_chat_message",
+      "description": "Collection of AI chat histories with 5-day retention policy"
+    }
+  }
+}

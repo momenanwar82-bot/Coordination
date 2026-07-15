@@ -1,0 +1,115 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Global Safety Net: Default Deny All
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // --- Global Helper Functions ---
+    
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    // --- Entity Validation Helper ---
+    
+    function isValidQuestion(data) {
+      return data.keys().hasAll(['author', 'userId', 'track', 'score', 'question', 'answer', 'likes', 'createdAt'])
+        && data.keys().size() == 8
+        && data.author is string && data.author.size() <= 100
+        && data.userId is string && data.userId.size() <= 128
+        && data.track is string && data.track.size() <= 100
+        && data.score is string && data.score.size() <= 20
+        && data.question is string && data.question.size() <= 1000
+        && data.answer is string && data.answer.size() <= 2000
+        && data.likes is int
+        && data.createdAt is timestamp;
+    }
+
+    function isValidAiChat(data) {
+      return data.keys().hasAll(['userId', 'sender', 'text', 'createdAt'])
+        && (data.keys().size() >= 4 && data.keys().size() <= 6)
+        && data.userId is string && data.userId.size() <= 128
+        && (data.sender == 'user' || data.sender == 'ai')
+        && data.text is string && data.text.size() <= 5000
+        && data.createdAt is timestamp
+        && (!data.keys().contains('stage') || (data.stage is string && data.stage.size() <= 100))
+        && (!data.keys().contains('score') || (data.score is string && data.score.size() <= 20));
+    }
+
+    // --- Collections ---
+
+    match /ai_chats/{chatId} {
+      allow get: if isSignedIn() && isValidId(chatId) && existing().userId == request.auth.uid;
+      allow list: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow create: if (
+        isSignedIn()
+        && isValidId(chatId)
+        && isValidAiChat(incoming())
+        && incoming().userId == request.auth.uid
+        && incoming().createdAt == request.time
+      );
+      allow delete: if (
+        isSignedIn()
+        && isValidId(chatId)
+        && existing().userId == request.auth.uid
+      );
+    }
+
+    match /community_questions/{questionId} {
+      // Validate document ID path variable to prevent path injection
+      allow get: if isValidId(questionId);
+
+      // Secure list query
+      allow list: if isSignedIn();
+
+      // Create Question
+      allow create: if (
+        isSignedIn()
+        && isValidId(questionId)
+        && isValidQuestion(incoming())
+        && incoming().userId == request.auth.uid
+        && incoming().likes == 0
+        && incoming().answer == ''
+        && incoming().createdAt == request.time
+      );
+
+      // Update Question (Action-Based validation)
+      allow update: if (
+        isSignedIn()
+        && isValidId(questionId)
+        && isValidQuestion(incoming())
+        && incoming().userId == existing().userId
+        && incoming().createdAt == existing().createdAt
+        && (
+          // Action 1: Like (increment likes exactly by 1)
+          (incoming().diff(existing()).affectedKeys().hasOnly(['likes']) && incoming().likes == existing().likes + 1)
+          ||
+          // Action 2: Owner Edit Question (edit question text only)
+          (existing().userId == request.auth.uid && incoming().diff(existing()).affectedKeys().hasOnly(['question']))
+        )
+      );
+
+      // Only allow the original author to delete their question
+      allow delete: if (
+        isSignedIn()
+        && isValidId(questionId)
+        && existing().userId == request.auth.uid
+      );
+    }
+  }
+}
