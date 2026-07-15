@@ -27,6 +27,7 @@ import Guides from './components/Guides';
 import PreferencesBuilder from './components/PreferencesBuilder';
 import ScholarshipsComparator from './components/ScholarshipsComparator';
 import DiplomaAdvisor from './components/DiplomaAdvisor';
+import ApiKeyManager from './components/ApiKeyManager';
 import { validateFirestoreConnection } from './lib/firebase';
 
 type MainTab = 'home' | 'results' | 'tools' | 'guides' | 'preferences' | 'scholarships' | 'diplomas';
@@ -77,18 +78,25 @@ export default function App() {
 
       {/* Main Beautiful Navigation Header */}
       <header className="bg-indigo-900 text-white shadow-md sticky top-0 z-40 shrink-0">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-3.5 flex flex-col md:flex-row md:items-center justify-between gap-4">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-3.5 flex flex-col lg:flex-row lg:items-center justify-between gap-4">
           
-          {/* Logo Brand Frame */}
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 bg-white rounded-lg flex items-center justify-center text-indigo-900 font-bold text-xl shadow-sm">
-              ت
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 w-full lg:w-auto">
+            {/* Logo Brand Frame */}
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 bg-white rounded-lg flex items-center justify-center text-indigo-900 font-bold text-xl shadow-sm font-black text-xl">
+                ت
+              </div>
+              <div>
+                <h1 className="text-lg sm:text-xl font-black tracking-tight text-white">
+                  تنسيـقـي <span className="text-indigo-300 text-xs font-normal mr-1">دليل القبول بالجامعات والمعاهد 2026</span>
+                </h1>
+                <p className="text-[10px] text-indigo-200/90 font-medium mt-0.5">البوابة الرسمية لأخبار التنسيق، مؤشرات القبول، والمعاهد المتاحة حسب المجموع</p>
+              </div>
             </div>
-            <div>
-              <h1 className="text-lg sm:text-xl font-black tracking-tight text-white">
-                تنسيـقـي <span className="text-indigo-300 text-xs font-normal mr-1">دليل القبول بالجامعات والمعاهد 2026</span>
-              </h1>
-              <p className="text-[10px] text-indigo-200/90 font-medium mt-0.5">البوابة الرسمية لأخبار التنسيق، مؤشرات القبول، والمعاهد المتاحة حسب المجموع</p>
+
+            {/* API Key Manager */}
+            <div className="shrink-0 self-start sm:self-center">
+              <ApiKeyManager />
             </div>
           </div>
 

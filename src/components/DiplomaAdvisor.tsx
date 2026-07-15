@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
+import { hasGeminiApiKey, callGeminiDirectly } from '../lib/gemini';
 import { 
   GraduationCap, 
   Send, 
@@ -170,20 +171,54 @@ export default function DiplomaAdvisor() {
     if (!customText) setInputMessage('');
     setIsSearching(true);
 
-    try {
-      const response = await fetch('/api/diploma-advisor', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          message: userText,
-          stage: selectedStage,
-          score: studentScore,
-          history: messages.map(m => ({ sender: m.sender, text: m.text }))
-        })
-      });
+    const systemInstruction = `أنت "مستشار التنسيق الشامل بالذكاء الاصطناعي" في مصر. مهمتك مساعدة الطلاب وأولياء الأمور في التنسيق لجميع المراحل (الثانوية العامة، الدبلومات الفنية بمختلف تخصصاتها، والثانوية الأزهرية) لعام 2026.
+بناءً على المرحلة الدراسية المحددة والنسبة المئوية/المجموع، قم بتحليل الاستفسار وتقديم نصائح دقيقة، مع الإشارة للكليات والمعاهد المناسبة وقواعد التنسيق مثل التوزيع الجغرافي وتقليل الاغتراب.
+إذا طلب الطالب ترتيب رغباته، فقم بإنشاء وتنسيق قائمة بالرغبات المقترحة المناسبة له.
+أجب باللغة العربية بأسلوب مشجع، مهني، ومبسط للغاية.`;
 
-      const data = await response.json();
-      const aiResponseText = data.answer || 'عذراً، لم نتمكن من جلب إجابة المستشار الذكي حالياً.';
+    try {
+      let aiResponseText = '';
+      if (hasGeminiApiKey()) {
+        const contents: any[] = [];
+        // Add chat history
+        messages.forEach((m) => {
+          contents.push({
+            role: m.sender === 'user' ? 'user' : 'model',
+            parts: [{ text: m.text }]
+          });
+        });
+        // Add current message
+        contents.push({
+          role: 'user',
+          parts: [{ text: `المرحلة الدراسية المحددة: ${selectedStage || "غير محددة"}\nالمجموع/النسبة المئوية: ${studentScore || "غير محدد"}%\nالاستفسار: ${userText}` }]
+        });
+
+        aiResponseText = await callGeminiDirectly({
+          model: "gemini-3.5-flash",
+          systemInstruction,
+          contents
+        });
+      } else {
+        try {
+          const response = await fetch('/api/diploma-advisor', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              message: userText,
+              stage: selectedStage,
+              score: studentScore,
+              history: messages.map(m => ({ sender: m.sender, text: m.text }))
+            })
+          });
+
+          if (!response.ok) throw new Error();
+          const data = await response.json();
+          aiResponseText = data.answer || 'عذراً، لم نتمكن من جلب إجابة المستشار الذكي حالياً.';
+        } catch (err) {
+          window.dispatchEvent(new Event('open-api-key-manager'));
+          throw new Error('يرجى إدخال مفتاح Gemini API في أعلى الصفحة لتشغيل مستشار التنسيق الشامل على GitHub Pages.');
+        }
+      }
 
       const aiMsgId = doc(collection(db, 'ai_chats')).id;
       await setDoc(doc(db, 'ai_chats', aiMsgId), {

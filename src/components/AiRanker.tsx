@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
+import { hasGeminiApiKey, callGeminiDirectly } from '../lib/gemini';
 import { 
   Sparkles, 
   Upload, 
@@ -107,27 +108,118 @@ export default function AiRanker({ initialPercentage = 0 }: AiRankerProps) {
       setLoadingStep(steps[stepIdx]);
     }, 1200);
 
+    const systemInstruction = `أنت خبير ومستشار التنسيق الجامعي والمهني في مصر. مهمتك تحليل درجات الطالب أو صور شهادة التنسيق/الدرجات المرفقة، وبناءً على الحد الأدنى المتوقع لتنسيق الجامعات المصرية 2026 (حكومية، أهلية، خاصة، ومعاهد)، قم بتوليد قائمة منسقة وواقعية لأفضل 20 رغبة مرجوة بدقة فائقة.
+قسم الرغبات إلى 3 فئات أساسية في الحقل "safetyLevel":
+1. "safe": رغبات مضمونة (الحد الأدنى أقل من مجموع الطالب بوضوح).
+2. "expected": رغبات متوقعة (تتطابق مع مجموع الطالب أو تقترب منه بنسبة بسيطة).
+3. "ambitious": رغبات طموحة (أعلى من مجموع الطالب بـ 1% إلى 3% يمكن تسجيلها في بداية الرغبات تحسباً لانخفاض التنسيق).
+
+يجب أن تعيد الإجابة حصرياً ككائن JSON بالهيكل التالي (بدون أي نصوص إضافية خارج JSON):
+{
+  "studentSummary": "تحليل موجز لمجموع الطالب والفرص المتاحة وتوجيهات هامة للتسجيل",
+  "recommendedTrack": "التحديد الأنسب للتخصص (علمي علوم، علمي رياضة، أدبي، أو دبلومات)",
+  "preferences": [
+    {
+      "rank": 1,
+      "name": "اسم الكلية أو المعهد بدقة",
+      "category": "medical | engineering | scientific | humanities | applied",
+      "type": "public | ahlia | private",
+      "minPercentage": 85.5,
+      "location": "المدينة أو المحافظة",
+      "safetyLevel": "safe | expected | ambitious",
+      "advice": "لماذا تم اختيار هذه الكلية وسبب ترتيبها في هذا المركز"
+    }
+  ]
+}`;
+
+    const textPrompt = `بيانات الطالب للتحليل:
+- المجموع أو النسبة المئوية: ${score || "مستخرج من الصورة المرفقة"}%
+- الشعبة أو التخصص: ${track || "غير محدد"}
+- المحافظة: ${governorate || "غير محدد"}
+- ملاحظات إضافية: ${notes || "لا توجد"}
+
+قم بتحليل هذه البيانات وتوليد جدول وترتيب الـ 20 رغبة بالطريقة المثلى الموصى بها في التنسيق الإلكتروني المصري.`;
+
     try {
-      const response = await fetch('/api/ai-ranker', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          score,
-          track,
-          governorate,
-          notes,
-          imageBase64,
-          mimeType,
-        }),
-      });
+      let data;
+      if (hasGeminiApiKey()) {
+        const parts: any[] = [];
+        if (imageBase64) {
+          const base64Data = imageBase64.includes(",") ? imageBase64.split(",")[1] : imageBase64;
+          parts.push({
+            inlineData: {
+              mimeType: mimeType || "image/jpeg",
+              data: base64Data,
+            },
+          });
+        }
+        parts.push({ text: textPrompt });
 
-      const data = await response.json();
-      clearInterval(interval);
+        const contents = [
+          { role: 'user', parts }
+        ];
 
-      if (!response.ok) {
-        throw new Error(data.error || 'فشل الاتصال بخدمة التحليل الذكي.');
+        const jsonSchema = {
+          type: "OBJECT",
+          properties: {
+            studentSummary: { type: "STRING" },
+            recommendedTrack: { type: "STRING" },
+            preferences: {
+              type: "ARRAY",
+              items: {
+                type: "OBJECT",
+                properties: {
+                  rank: { type: "INTEGER" },
+                  name: { type: "STRING" },
+                  category: { type: "STRING" },
+                  type: { type: "STRING" },
+                  minPercentage: { type: "NUMBER" },
+                  location: { type: "STRING" },
+                  safetyLevel: { type: "STRING" },
+                  advice: { type: "STRING" }
+                },
+                required: ["rank", "name", "category", "type", "minPercentage", "location", "safetyLevel", "advice"]
+              }
+            }
+          },
+          required: ["studentSummary", "recommendedTrack", "preferences"]
+        };
+
+        const resultText = await callGeminiDirectly({
+          model: "gemini-3.5-flash",
+          systemInstruction,
+          contents,
+          responseMimeType: "application/json",
+          responseSchema: jsonSchema
+        });
+
+        data = JSON.parse(resultText);
+      } else {
+        try {
+          const response = await fetch('/api/ai-ranker', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              score,
+              track,
+              governorate,
+              notes,
+              imageBase64,
+              mimeType,
+            }),
+          });
+
+          if (!response.ok) {
+            throw new Error();
+          }
+          data = await response.json();
+        } catch (e) {
+          window.dispatchEvent(new Event('open-api-key-manager'));
+          throw new Error('يرجى إدخال مفتاح Gemini API في أعلى الصفحة لتشغيل خدمات الذكاء الاصطناعي على GitHub Pages.');
+        }
       }
 
+      clearInterval(interval);
       setResultData(data);
     } catch (err: any) {
       clearInterval(interval);
@@ -144,16 +236,43 @@ export default function AiRanker({ initialPercentage = 0 }: AiRankerProps) {
     setLawyerLoading(true);
     setLawyerAnswer(null);
 
+    const systemInstruction = `أنت "محامي ومستشار التنسيق وقواعد التعليم العالي في مصر"، خبير قانوني وأكاديمي مطلع بدقة على قرارات المجلس الأعلى للجامعات، قواعد التوزيع الجغرافي (أ وب)، شروط تقليل الاغتراب (المناظر وغير المناظر بنسبة 10%)، تظلمات الثانوية العامة والدبلومات الفنية، وقواعد التحويلات.
+أجب على سؤال الطالب بدقة متناهية، وبأسلوب احترافي، قانوني، ومطمئن، مع ذكر النصائح الإدارية والقانونية الرسمية في مصر لعام 2026.
+أجب باللغة العربية حصرياً.`;
+
+    const promptText = `سؤال الطالب / ولي الأمر:
+- الشعبة: ${track || "عام"}
+- المجموع: ${score || "غير محدد"}
+- الاستفسار: ${lawyerQuestion}`;
+
     try {
-      const res = await fetch('/api/tansik-lawyer', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ question: lawyerQuestion, track, score })
-      });
-      const data = await res.json();
-      setLawyerAnswer(data.answer);
-    } catch (err) {
-      setLawyerAnswer('عذراً، حدث خطأ في الاتصال بمستشار التنسيق القانوني. يجدر بك مراجعة مكتب التنسيق.');
+      if (hasGeminiApiKey()) {
+        const contents = [
+          { role: 'user', parts: [{ text: promptText }] }
+        ];
+        const answer = await callGeminiDirectly({
+          model: "gemini-3.5-flash",
+          systemInstruction,
+          contents,
+        });
+        setLawyerAnswer(answer);
+      } else {
+        try {
+          const res = await fetch('/api/tansik-lawyer', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ question: lawyerQuestion, track, score })
+          });
+          if (!res.ok) throw new Error();
+          const data = await res.json();
+          setLawyerAnswer(data.answer);
+        } catch (err) {
+          window.dispatchEvent(new Event('open-api-key-manager'));
+          setLawyerAnswer('يرجى إدخال مفتاح Gemini API في أعلى الصفحة لتشغيل مستشار التنسيق القانوني على GitHub Pages.');
+        }
+      }
+    } catch (err: any) {
+      setLawyerAnswer(err.message || 'حدث خطأ غير متوقع. حاول مرة أخرى.');
     } finally {
       setLawyerLoading(false);
     }

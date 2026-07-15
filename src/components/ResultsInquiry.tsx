@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
+import { hasGeminiApiKey, callGeminiDirectly } from '../lib/gemini';
 import { 
   Building2, 
   Search, 
@@ -111,8 +112,93 @@ export default function TansikNewsHub({ onNavigate }: ResultsInquiryProps) {
   const fetchLiveNews = async () => {
     setNewsLoading(true);
     try {
-      const response = await fetch('/api/live-education-news');
-      const data = await response.json();
+      let data;
+      if (hasGeminiApiKey()) {
+        const prompt = `أنت محرر صحفي تعليمي مصري رفيع المستوى يغطي أخبار التنسيق والتعليم العالي والدبلومات الفنية لعام 2026.
+قم بتوليد 6 أخبار عاجلة وحصرية جديدة ومتنوعة بصيغة JSON حصرياً (بدون أي نصوص إضافية خارج JSON).
+كل خبر يجب أن يحتوي على:
+- id: رقم مميز
+- title: عنوان الخبر العاجل جذاب وبارز
+- category: "diploma" أو "thanawya" أو "tansik" أو "universities"
+- excerpt: ملخص تفصيلي للخبر في سطرين
+- content: النص الكامل والشامل للخبر في 3 فقرات تفصيلية تشرح التفاصيل والأسباب والتوجيهات الرسمية للطلاب وأولياء الأمور
+- time: توقيت حديث (مثل: منذ 5 دقائق، منذ 12 دقيقة، منذ نصف ساعة)
+- urgent: boolean (بعضها true لتظهر كأخبار عاجلة)
+- views: عدد مشاهدات افتراضي (مثل: "14.2 ألف مشاهدة")
+
+الهيكل المطلوب:
+{
+  "breakingNews": "عاجل الآن: بدء العد التنازلي لإطلاق المرحلة الأولى للتنسيق الإلكتروني للجامعات والمعاهد الحكومية والأهلية...",
+  "newsList": [
+    {
+      "id": "1",
+      "title": "...",
+      "category": "...",
+      "excerpt": "...",
+      "content": "...",
+      "time": "...",
+      "urgent": true,
+      "views": "..."
+    }
+  ]
+}`;
+
+        const jsonSchema = {
+          type: "OBJECT",
+          properties: {
+            breakingNews: { type: "STRING" },
+            newsList: {
+              type: "ARRAY",
+              items: {
+                type: "OBJECT",
+                properties: {
+                  id: { type: "STRING" },
+                  title: { type: "STRING" },
+                  category: { type: "STRING" },
+                  excerpt: { type: "STRING" },
+                  content: { type: "STRING" },
+                  time: { type: "STRING" },
+                  urgent: { type: "BOOLEAN" },
+                  views: { type: "STRING" }
+                },
+                required: ["id", "title", "category", "excerpt", "content", "time", "urgent", "views"]
+              }
+            }
+          },
+          required: ["breakingNews", "newsList"]
+        };
+
+        const resultText = await callGeminiDirectly({
+          model: "gemini-3.5-flash",
+          contents: [{ role: 'user', parts: [{ text: prompt }] }],
+          responseMimeType: "application/json",
+          responseSchema: jsonSchema
+        });
+
+        data = JSON.parse(resultText);
+      } else {
+        try {
+          const response = await fetch('/api/live-education-news');
+          if (!response.ok) throw new Error();
+          data = await response.json();
+        } catch (serverErr) {
+          // Beautiful static local fallback if no server or API key is set
+          data = {
+            breakingNews: "عاجل الآن: بدء تسجيل الرغبات الإلكتروني لعام 2026 وسط إتاحة شاملة لكافة المعاهد والكليات.",
+            newsList: LATEST_NEWS.map((n, i) => ({
+              id: String(i + 1),
+              title: n.title,
+              category: n.category,
+              excerpt: n.excerpt,
+              content: n.content || n.excerpt,
+              time: n.date || "منذ 10 دقائق",
+              urgent: i === 0,
+              views: "12 ألف"
+            }))
+          };
+        }
+      }
+
       if (data && data.newsList) {
         setLiveNews(data.newsList);
         if (data.breakingNews) {
@@ -121,6 +207,17 @@ export default function TansikNewsHub({ onNavigate }: ResultsInquiryProps) {
       }
     } catch (err) {
       console.error("Failed to fetch live news:", err);
+      // Even if overall flow crashes, fall back to LATEST_NEWS
+      setLiveNews(LATEST_NEWS.map((n, i) => ({
+        id: String(i + 1),
+        title: n.title,
+        category: n.category,
+        excerpt: n.excerpt,
+        content: n.content || n.excerpt,
+        time: n.date || "منذ 10 دقائق",
+        urgent: i === 0,
+        views: "12 ألف"
+      })));
     } finally {
       setNewsLoading(false);
     }
